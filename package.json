@@ -1,0 +1,26 @@
+{
+  "name": "aiea",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ea": "dist/cli.js"
+  },
+  "scripts": {
+    "ea": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run build"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.68.0",
+    "@sinclair/typebox": "^0.34.41"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}
