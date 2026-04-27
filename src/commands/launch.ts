@@ -7,6 +7,7 @@ import { getEaHome } from "../lib/paths.js";
 const TOOL_ALLOWLIST = [
   "ea_inbox_add",
   "ea_inbox_list",
+  "ea_inbox_set_label",
   "ea_inbox_mark_done",
   "ea_inbox_defer",
   "ea_inbox_promote_to_day",

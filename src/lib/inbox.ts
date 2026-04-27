@@ -10,12 +10,14 @@ export interface InboxItem {
   timestamp: string;
   type: InboxItemType;
   text: string;
+  label?: string;
   reviewOn?: string;
   line: string;
 }
 
 const INBOX_HEADER = "# Inbox\n";
 const itemPattern = /^- \[( |x)\] \[id:([^\]]+)\] ([^ ]+) (task|reminder|note): (.+)$/;
+const labelPattern = / \[label:([^\]]+)\]/;
 const reviewOnPattern = / \[review_on:(\d{4}-\d{2}-\d{2})\]$/;
 
 function formatDateKey(date: Date): string {
@@ -49,9 +51,33 @@ function ensureHeader(content: string): string {
   return `${INBOX_HEADER}\n${trimmed}\n`;
 }
 
-function formatInboxLine(item: Pick<InboxItem, "id" | "done" | "timestamp" | "type" | "text" | "reviewOn">): string {
-  const metadata = item.reviewOn ? ` [review_on:${item.reviewOn}]` : "";
-  return `- [${item.done ? "x" : " "}] [id:${item.id}] ${item.timestamp} ${item.type}: ${item.text}${metadata}`;
+function formatTimestampContext(timestamp: string, now = new Date()): string {
+  const date = new Date(timestamp);
+  const sameDay = date.toISOString().slice(0, 10) === now.toISOString().slice(0, 10);
+  const yesterday = new Date(now);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const isYesterday = date.toISOString().slice(0, 10) === yesterday.toISOString().slice(0, 10);
+  const time = date.toISOString().slice(11, 19);
+
+  if (sameDay) {
+    return `captured today at ${time}`;
+  }
+  if (isYesterday) {
+    return `captured yesterday at ${time}`;
+  }
+  return `captured ${date.toISOString().slice(0, 10)} at ${time}`;
+}
+
+function formatInboxLine(item: Pick<InboxItem, "id" | "done" | "timestamp" | "type" | "text" | "label" | "reviewOn">): string {
+  const metadata: string[] = [];
+  if (item.label) {
+    metadata.push(`[label:${item.label}]`);
+  }
+  if (item.reviewOn) {
+    metadata.push(`[review_on:${item.reviewOn}]`);
+  }
+  const suffix = metadata.length > 0 ? ` ${metadata.join(" ")}` : "";
+  return `- [${item.done ? "x" : " "}] [id:${item.id}] ${item.timestamp} ${item.type}: ${item.text}${suffix}`;
 }
 
 function parseInboxLine(line: string): InboxItem | undefined {
@@ -61,8 +87,12 @@ function parseInboxLine(line: string): InboxItem | undefined {
   }
 
   const [, doneFlag, id, timestamp, type, rawText] = match;
-  const reviewOnMatch = reviewOnPattern.exec(rawText);
-  const text = reviewOnMatch ? rawText.slice(0, reviewOnMatch.index).trimEnd() : rawText;
+  const labelMatch = labelPattern.exec(rawText);
+  const withoutLabel = labelMatch
+    ? `${rawText.slice(0, labelMatch.index)}${rawText.slice(labelMatch.index + labelMatch[0].length)}`.trimEnd()
+    : rawText;
+  const reviewOnMatch = reviewOnPattern.exec(withoutLabel);
+  const text = reviewOnMatch ? withoutLabel.slice(0, reviewOnMatch.index).trimEnd() : withoutLabel;
 
   return {
     id,
@@ -70,9 +100,53 @@ function parseInboxLine(line: string): InboxItem | undefined {
     timestamp,
     type: type as InboxItemType,
     text,
+    label: labelMatch?.[1],
     reviewOn: reviewOnMatch?.[1],
     line,
   };
+}
+
+export function getInboxItemBaseLabel(item: Pick<InboxItem, "text" | "label">): string {
+  return item.label?.trim() || item.text.trim();
+}
+
+export function getInboxItemDisplayLabel(
+  item: Pick<InboxItem, "id" | "text" | "label" | "type" | "timestamp" | "reviewOn">,
+  peers: Array<Pick<InboxItem, "id" | "text" | "label" | "type" | "timestamp" | "reviewOn">>,
+  now = new Date(),
+): string {
+  const base = getInboxItemBaseLabel(item);
+  const qualifiers: string[] = [];
+
+  if (item.reviewOn) {
+    qualifiers.push(`review on ${item.reviewOn}`);
+  }
+
+  const duplicateBaseCount = peers.filter((peer) => getInboxItemBaseLabel(peer) === base).length;
+  if (duplicateBaseCount > 1) {
+    qualifiers.push(formatTimestampContext(item.timestamp, now));
+  }
+
+  let display = qualifiers.length > 0 ? `${base} (${qualifiers.join(", ")})` : base;
+
+  const duplicateDisplayCount = peers.filter((peer) => {
+    const peerBase = getInboxItemBaseLabel(peer);
+    const peerQualifiers: string[] = [];
+    if (peer.reviewOn) {
+      peerQualifiers.push(`review on ${peer.reviewOn}`);
+    }
+    if (duplicateBaseCount > 1) {
+      peerQualifiers.push(formatTimestampContext(peer.timestamp, now));
+    }
+    const peerDisplay = peerQualifiers.length > 0 ? `${peerBase} (${peerQualifiers.join(", ")})` : peerBase;
+    return peerDisplay === display;
+  }).length;
+
+  if (duplicateDisplayCount > 1) {
+    display = `${display} (${item.type}, #${item.id.slice(-4)})`;
+  }
+
+  return display;
 }
 
 async function readInboxFile(): Promise<string> {
@@ -206,6 +280,30 @@ export async function deferInboxItem(itemId: string, reviewOn: string): Promise<
       continue;
     }
     const updatedItem: InboxItem = { ...item, reviewOn };
+    const updatedLine = formatInboxLine(updatedItem);
+    lines[index] = updatedLine;
+    await writeInboxFile(`${lines.join("\n")}`);
+    return { ...updatedItem, line: updatedLine };
+  }
+
+  throw new Error(`Inbox item not found: ${itemId}`);
+}
+
+export async function setInboxItemLabel(itemId: string, label: string): Promise<InboxItem> {
+  const trimmedLabel = label.trim();
+  if (!trimmedLabel) {
+    throw new Error("Inbox item label cannot be empty.");
+  }
+
+  const content = await readInboxFile();
+  const lines = content.split("\n");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const item = parseInboxLine(lines[index]);
+    if (!item || item.id !== itemId) {
+      continue;
+    }
+    const updatedItem: InboxItem = { ...item, label: trimmedLabel };
     const updatedLine = formatInboxLine(updatedItem);
     lines[index] = updatedLine;
     await writeInboxFile(`${lines.join("\n")}`);

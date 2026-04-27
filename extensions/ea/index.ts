@@ -1,6 +1,13 @@
 import type { BuildSystemPromptOptions, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { addInboxItem, deferInboxItem, listInboxItems, markInboxItemDone } from "../../src/lib/inbox.js";
+import {
+  addInboxItem,
+  deferInboxItem,
+  getInboxItemDisplayLabel,
+  listInboxItems,
+  markInboxItemDone,
+  setInboxItemLabel,
+} from "../../src/lib/inbox.js";
 import {
   addInboxItemToDayPlan,
   addInboxItemToWeekPlan,
@@ -26,6 +33,8 @@ Rules:
 - Review open inbox items before proposing a plan.
 - Use day and week plan tools to turn inbox items into concrete plans.
 - Mark items done only when the user clearly confirms completion or the conversation has clearly resolved the item.
+- Use human-readable task names in replies. Use item IDs only for tool calls or when disambiguation is unavoidable.
+- When an inbox capture is too long or messy, create a short label during triage and use that label in user-facing replies.
 - Be concise and practical.
 
 Available memory:
@@ -46,7 +55,7 @@ function formatInboxListText(items: Awaited<ReturnType<typeof listInboxItems>>):
     return "No inbox items.";
   }
   return items
-    .map((item) => `- [${item.done ? "x" : " "}] ${item.id} ${item.type}: ${item.text}${item.reviewOn ? ` (review_on ${item.reviewOn})` : ""}`)
+    .map((item) => `- [${item.done ? "x" : " "}] ${getInboxItemDisplayLabel(item, items)}`)
     .join("\n");
 }
 
@@ -72,7 +81,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params) {
       const item = await addInboxItem(params.text);
       return {
-        content: [{ type: "text", text: `Added ${item.type} ${item.id}: ${item.text}` }],
+        content: [{ type: "text", text: `Added ${item.type}: ${getInboxItemDisplayLabel(item, [item])}` }],
         details: item,
       };
     },
@@ -105,7 +114,24 @@ export default function eaExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params) {
       const item = await deferInboxItem(params.id, params.reviewOn);
       return {
-        content: [{ type: "text", text: `Deferred ${item.id} until ${item.reviewOn}: ${item.text}` }],
+        content: [{ type: "text", text: `Deferred ${getInboxItemDisplayLabel(item, [item])}` }],
+        details: item,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ea_inbox_set_label",
+    label: "EA Inbox Label",
+    description: "Set a short human-readable label for an inbox item by ID.",
+    parameters: Type.Object({
+      id: Type.String({ description: "Inbox item ID" }),
+      label: Type.String({ description: "Short label for the inbox item" }),
+    }),
+    async execute(_toolCallId, params) {
+      const item = await setInboxItemLabel(params.id, params.label);
+      return {
+        content: [{ type: "text", text: `Set label: ${getInboxItemDisplayLabel(item, [item])}` }],
         details: item,
       };
     },
@@ -121,7 +147,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params) {
       const item = await markInboxItemDone(params.id);
       return {
-        content: [{ type: "text", text: `Marked ${item.id} done: ${item.text}` }],
+        content: [{ type: "text", text: `Marked done: ${getInboxItemDisplayLabel(item, [item])}` }],
         details: item,
       };
     },
@@ -137,8 +163,9 @@ export default function eaExtension(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params) {
       const plan = await addInboxItemToDayPlan(params.id, params.date ?? getDateKey());
+      const promoted = plan.scheduled.find((item) => item.sourceId === params.id);
       return {
-        content: [{ type: "text", text: `Promoted ${params.id} into day plan ${plan.date}` }],
+        content: [{ type: "text", text: `Promoted ${promoted?.text ?? "item"} into day plan ${plan.date}` }],
         details: plan,
       };
     },
@@ -154,8 +181,9 @@ export default function eaExtension(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params) {
       const plan = await addInboxItemToWeekPlan(params.id, params.week ?? getIsoWeekKey());
+      const promoted = plan.scheduled.find((item) => item.sourceId === params.id);
       return {
-        content: [{ type: "text", text: `Promoted ${params.id} into week plan ${plan.week}` }],
+        content: [{ type: "text", text: `Promoted ${promoted?.text ?? "item"} into week plan ${plan.week}` }],
         details: plan,
       };
     },
@@ -173,7 +201,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
       const text = [
         `Day plan ${plan.date}`,
         `Priorities: ${plan.priorities.length ? plan.priorities.join(" | ") : "(none)"}`,
-        `Scheduled: ${plan.scheduled.length ? plan.scheduled.map((item) => `${item.sourceId} ${item.type}: ${item.text}`).join(" | ") : "(none)"}`,
+        `Scheduled: ${plan.scheduled.length ? plan.scheduled.map((item) => item.text).join(" | ") : "(none)"}`,
       ].join("\n");
       return {
         content: [{ type: "text", text }],
@@ -211,7 +239,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
       const text = [
         `Week plan ${plan.week}`,
         `Priorities: ${plan.priorities.length ? plan.priorities.join(" | ") : "(none)"}`,
-        `Scheduled: ${plan.scheduled.length ? plan.scheduled.map((item) => `${item.sourceId} ${item.type}: ${item.text}`).join(" | ") : "(none)"}`,
+        `Scheduled: ${plan.scheduled.length ? plan.scheduled.map((item) => item.text).join(" | ") : "(none)"}`,
       ].join("\n");
       return {
         content: [{ type: "text", text }],
@@ -249,7 +277,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
       }
       const item = await addInboxItem(text);
       if (ctx.hasUI) {
-        ctx.ui.notify(`Added ${item.type} ${item.id}`, "success");
+        ctx.ui.notify(`Added ${item.type}: ${getInboxItemDisplayLabel(item, [item])}`, "success");
       }
     },
   });
@@ -258,7 +286,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
     description: "Review open inbox items and suggest triage actions",
     handler: async () => {
       pi.sendUserMessage(
-        "Review the open inbox items, highlight anything deferred for review, and suggest the next triage actions. When appropriate, recommend whether specific items should be deferred, promoted into a day or week plan, or marked done. Reference item IDs when discussing items.",
+        "Review the open inbox items, highlight anything deferred for review, and suggest the next triage actions. When an inbox capture is too long or messy, create a short label for it. Use human-readable task names in your reply. Use item IDs only for tool calls or if disambiguation is unavoidable.",
       );
     },
   });
@@ -267,7 +295,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
     description: "Review inbox and propose today's priorities",
     handler: async () => {
       pi.sendUserMessage(
-        "Review the open inbox items and today's day plan. Identify the most important items for today, write a concise priorities section for the day plan when helpful, and promote specific inbox items into today's scheduled section when they belong there. Reference item IDs when discussing specific items.",
+        "Review the open inbox items and today's day plan. Identify the most important items for today, write a concise priorities section for the day plan when helpful, and promote specific inbox items into today's scheduled section when they belong there. Use human-readable task names in your reply. Use item IDs only for tool calls or if disambiguation is unavoidable.",
       );
     },
   });
@@ -276,7 +304,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
     description: "Review inbox and propose this week's priorities",
     handler: async () => {
       pi.sendUserMessage(
-        "Review the open inbox items and the current week plan. Group work into this week's priorities, write a concise priorities section for the week plan when helpful, and promote specific inbox items into this week's scheduled section when they belong there. Reference item IDs when discussing specific items.",
+        "Review the open inbox items and the current week plan. Group work into this week's priorities, write a concise priorities section for the week plan when helpful, and promote specific inbox items into this week's scheduled section when they belong there. Use human-readable task names in your reply. Use item IDs only for tool calls or if disambiguation is unavoidable.",
       );
     },
   });

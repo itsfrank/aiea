@@ -5,7 +5,7 @@ import {
   getDailyPlanPath,
   getWeeklyPlanPath,
 } from "./paths.js";
-import { getInboxItem, type InboxItem } from "./inbox.js";
+import { getInboxItem, getInboxItemBaseLabel, type InboxItem } from "./inbox.js";
 
 export interface ScheduledPlanItem {
   sourceId: string;
@@ -168,7 +168,7 @@ export async function addInboxItemToDayPlan(itemId: string, date = getDateKey())
   const inboxItem = await getInboxItem(itemId);
   const next: DayPlan = {
     ...plan,
-    scheduled: [...plan.scheduled, { sourceId: itemId, type: inboxItem.type, text: inboxItem.text }],
+    scheduled: [...plan.scheduled, { sourceId: itemId, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem) }],
   };
   await writeFile(next.path, formatDayPlan(next), "utf8");
   return next;
@@ -203,7 +203,7 @@ export async function addInboxItemToWeekPlan(itemId: string, week = getIsoWeekKe
   const inboxItem = await getInboxItem(itemId);
   const next: WeekPlan = {
     ...plan,
-    scheduled: [...plan.scheduled, { sourceId: itemId, type: inboxItem.type, text: inboxItem.text }],
+    scheduled: [...plan.scheduled, { sourceId: itemId, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem) }],
   };
   await writeFile(next.path, formatWeekPlan(next), "utf8");
   return next;
