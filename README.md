@@ -10,6 +10,8 @@ Minimal terminal executive assistant built on top of the pi coding agent harness
 
 ## Install
 
+Prerequisite: pi must be installed and configured. See pi's [Quick Start setup instructions](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
+
 ```bash
 npm install
 npm run build
