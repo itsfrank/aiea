@@ -5,6 +5,7 @@ Minimal terminal executive assistant built on top of the pi coding agent harness
 ## What it does
 
 - `ea add "..."` appends a new item to `~/.ea/inbox.md`
+- `ea day` prints today's plan when one exists
 - `ea` launches pi with a restrictive tool allowlist that exposes only EA inbox tools
 - the assistant can add items, label long captures, defer items, promote items into day/week plans, and mark inbox items done
 
@@ -31,6 +32,7 @@ Add a new inbox item:
 npm run ea -- add "task: draft weekly plan"
 npm run ea -- add "reminder: follow up with Sam"
 npm run ea -- add "Maybe schedule dentist appointment"
+npm run ea -- day
 ```
 
 Launch the assistant:
