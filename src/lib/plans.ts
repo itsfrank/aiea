@@ -1,7 +1,8 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import {
   ensureDailyPlansDir,
   ensureWeeklyPlansDir,
+  getDailyPlansDir,
   getDailyPlanPath,
   getWeeklyPlanPath,
 } from "./paths.js";
@@ -13,6 +14,7 @@ export interface ScheduledPlanItem {
   done: boolean;
   type: InboxItem["type"];
   text: string;
+  notes: string[];
 }
 
 export interface DayPlan {
@@ -38,7 +40,10 @@ function formatBulletSection(lines: string[]): string[] {
 }
 
 function formatScheduledSection(items: ScheduledPlanItem[]): string[] {
-  return items.map((item) => `- [${item.done ? "x" : " "}] [from:${item.sourceId}] ${item.type}: ${item.text}`);
+  return items.flatMap((item) => [
+    `- [${item.done ? "x" : " "}] [from:${item.sourceId}] ${item.type}: ${item.text}`,
+    ...item.notes.map((note) => `  - ${note}`),
+  ]);
 }
 
 function collectBulletItems(lines: string[]): string[] {
@@ -51,14 +56,21 @@ function collectBulletItems(lines: string[]): string[] {
 
 function collectScheduledItems(lines: string[]): ScheduledPlanItem[] {
   const items: ScheduledPlanItem[] = [];
+  let current: ScheduledPlanItem | undefined;
+
   for (const line of lines) {
-    const trimmed = line.trim();
-    const match = scheduledPattern.exec(trimmed);
-    if (!match) {
+    const match = scheduledPattern.exec(line.trim());
+    if (match) {
+      const [, doneFlag, sourceId, type, text] = match;
+      current = { sourceId, done: doneFlag === "x", type: type as InboxItem["type"], text, notes: [] };
+      items.push(current);
       continue;
     }
-    const [, doneFlag, sourceId, type, text] = match;
-    items.push({ sourceId, done: doneFlag === "x", type: type as InboxItem["type"], text });
+
+    const noteMatch = /^\s{2,}-\s+(.+)$/.exec(line);
+    if (noteMatch && current) {
+      current.notes.push(noteMatch[1].trim());
+    }
   }
   return items;
 }
@@ -171,7 +183,10 @@ export async function addInboxItemToDayPlan(itemId: string, date = getDateKey())
   const inboxItem = await getInboxItem(itemId);
   const next: DayPlan = {
     ...plan,
-    scheduled: [...plan.scheduled, { sourceId: itemId, done: inboxItem.done, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem) }],
+    scheduled: [
+      ...plan.scheduled,
+      { sourceId: itemId, done: inboxItem.done, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem), notes: [] },
+    ],
   };
   await writeFile(next.path, formatDayPlan(next), "utf8");
   return next;
@@ -208,6 +223,52 @@ export async function removeInboxItemFromDayPlan(itemId: string, date = getDateK
 export async function listUnfinishedDayPlanItems(date = getDateKey()): Promise<ScheduledPlanItem[]> {
   const plan = await readDayPlan(date);
   return plan.scheduled.filter((item) => !item.done);
+}
+
+export async function addDayPlanItemNote(itemId: string, note: string, date = getDateKey()): Promise<{ plan: DayPlan; item: ScheduledPlanItem }> {
+  const trimmed = note.trim();
+  if (!trimmed) {
+    throw new Error("Note cannot be empty");
+  }
+  const plan = await readDayPlan(date);
+  const scheduledItem = plan.scheduled.find((item) => item.sourceId === itemId);
+  if (!scheduledItem) {
+    throw new Error(`Day plan item not found for ${date}: ${itemId}`);
+  }
+  const next: DayPlan = {
+    ...plan,
+    scheduled: plan.scheduled.map((item) => (item.sourceId === itemId ? { ...item, notes: [...item.notes, trimmed] } : item)),
+  };
+  await writeFile(next.path, formatDayPlan(next), "utf8");
+  const item = next.scheduled.find((candidate) => candidate.sourceId === itemId);
+  if (!item) {
+    throw new Error(`Day plan item not found for ${date}: ${itemId}`);
+  }
+  return { plan: next, item };
+}
+
+export async function findLatestDayPlanBefore(date = getDateKey(), lookbackDays = 14): Promise<DayPlan | undefined> {
+  await ensureDailyPlansDir();
+  const entries = await readdir(getDailyPlansDir());
+  const candidateDates = entries
+    .map((entry) => /^(\d{4}-\d{2}-\d{2})\.md$/.exec(entry)?.[1])
+    .filter((entryDate): entryDate is string => typeof entryDate === "string" && entryDate < date)
+    .sort((a, b) => b.localeCompare(a));
+
+  const earliest = new Date(`${date}T00:00:00`);
+  earliest.setDate(earliest.getDate() - lookbackDays);
+  const earliestKey = getDateKey(earliest);
+
+  for (const candidateDate of candidateDates) {
+    if (candidateDate < earliestKey) {
+      break;
+    }
+    const plan = await readDayPlan(candidateDate);
+    if (plan.scheduled.length > 0) {
+      return plan;
+    }
+  }
+  return undefined;
 }
 
 export async function carryDayPlanItemForward(
@@ -253,7 +314,10 @@ export async function addInboxItemToWeekPlan(itemId: string, week = getIsoWeekKe
   const inboxItem = await getInboxItem(itemId);
   const next: WeekPlan = {
     ...plan,
-    scheduled: [...plan.scheduled, { sourceId: itemId, done: inboxItem.done, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem) }],
+    scheduled: [
+      ...plan.scheduled,
+      { sourceId: itemId, done: inboxItem.done, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem), notes: [] },
+    ],
   };
   await writeFile(next.path, formatWeekPlan(next), "utf8");
   return next;

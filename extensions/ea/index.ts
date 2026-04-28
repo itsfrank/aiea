@@ -9,9 +9,11 @@ import {
   setInboxItemLabel,
 } from "../../src/lib/inbox.js";
 import {
+  addDayPlanItemNote,
   addInboxItemToDayPlan,
   addInboxItemToWeekPlan,
   carryDayPlanItemForward,
+  findLatestDayPlanBefore,
   getDateKey,
   getIsoWeekKey,
   getYesterdayDateKey,
@@ -207,7 +209,16 @@ export default function eaExtension(pi: ExtensionAPI): void {
       const text = [
         `Day plan ${plan.date}`,
         `Priorities: ${plan.priorities.length ? plan.priorities.join(" | ") : "(none)"}`,
-        `Scheduled: ${plan.scheduled.length ? plan.scheduled.map((item) => `${item.done ? "done" : "open"}: ${item.text} [id:${item.sourceId}]`).join(" | ") : "(none)"}`,
+        `Scheduled: ${
+          plan.scheduled.length
+            ? plan.scheduled
+                .map((item) => {
+                  const notes = item.notes.length ? ` notes: ${item.notes.join("; ")}` : "";
+                  return `${item.done ? "done" : "open"}: ${item.text} [id:${item.sourceId}]${notes}`;
+                })
+                .join(" | ")
+            : "(none)"
+        }`,
       ].join("\n");
       return {
         content: [{ type: "text", text }],
@@ -232,6 +243,46 @@ export default function eaExtension(pi: ExtensionAPI): void {
       return {
         content: [{ type: "text", text: `Unfinished items for ${date}:\n${text}` }],
         details: { date, items },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ea_day_plan_find_latest_before",
+    label: "EA Day Plan Find Latest",
+    description: "Find the latest previous day plan with scheduled items before a date, for morning review after skipped days/weekends.",
+    parameters: Type.Object({
+      date: Type.Optional(Type.String({ description: "Date in YYYY-MM-DD format; defaults to today" })),
+      lookbackDays: Type.Optional(Type.Number({ description: "Maximum days to look back; defaults to 14" })),
+    }),
+    async execute(_toolCallId, params) {
+      const plan = await findLatestDayPlanBefore(params.date ?? getDateKey(), params.lookbackDays ?? 14);
+      const text = plan
+        ? `Latest previous day plan: ${plan.date}\n${plan.scheduled
+            .map((item) => `- [${item.done ? "x" : " "}] ${item.text} [id:${item.sourceId}]${item.notes.length ? ` notes: ${item.notes.join("; ")}` : ""}`)
+            .join("\n")}`
+        : "No previous day plan with scheduled items found.";
+      return {
+        content: [{ type: "text", text }],
+        details: { plan: plan ?? null },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ea_day_plan_add_item_note",
+    label: "EA Day Plan Item Note",
+    description: "Append a note under a scheduled day-plan item by source inbox ID. Use the date when the work happened.",
+    parameters: Type.Object({
+      id: Type.String({ description: "Source inbox item ID" }),
+      note: Type.String({ description: "Short note to append under the scheduled item" }),
+      date: Type.Optional(Type.String({ description: "Date in YYYY-MM-DD format; defaults to today" })),
+    }),
+    async execute(_toolCallId, params) {
+      const result = await addDayPlanItemNote(params.id, params.note, params.date ?? getDateKey());
+      return {
+        content: [{ type: "text", text: `Added note to ${result.item.text} on ${result.plan.date}` }],
+        details: result,
       };
     },
   });
@@ -355,7 +406,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
       }
       const item = await addInboxItem(text);
       if (ctx.hasUI) {
-        ctx.ui.notify(`Added ${item.type}: ${getInboxItemDisplayLabel(item, [item])}`, "success");
+        ctx.ui.notify(`Added ${item.type}: ${getInboxItemDisplayLabel(item, [item])}`, "info");
       }
     },
   });
@@ -373,7 +424,7 @@ export default function eaExtension(pi: ExtensionAPI): void {
     description: "Review yesterday and plan today",
     handler: async () => {
       pi.sendUserMessage(
-        "Run morning planning. Read yesterday's day plan, today's day plan, and open inbox items. First identify unfinished scheduled items from yesterday. Ask which are done, which should carry forward into today, which should simply return to the inbox by not carrying them forward, and which should be deferred. Then propose today's top priorities and promote selected inbox items into today's plan. If I say an item is finished, use the plan/inbox details to find the source ID and mark it done; ask only if ambiguous.",
+        "Run morning planning. First find the latest previous day plan with scheduled items before today, looking back up to 14 days, then read today's day plan and open inbox items. Tell me which previous plan date you found; if none exists, skip retrospective review and plan today. For the previous plan, ask what I did for each scheduled item where a note would be useful; save those notes on that previous day plan with ea_day_plan_add_item_note, without prefixing them with 'yesterday'. Then ask which items are done, which should carry forward into today, which should simply return to the inbox by not carrying them forward, and which should be deferred. When carrying forward from the previous plan, pass that previous plan date as fromDate. Then propose today's top priorities and promote selected inbox items into today's plan. If I say an item is finished, use the plan/inbox details to find the source ID and mark it done; ask only if ambiguous.",
       );
     },
   });

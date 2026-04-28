@@ -14,6 +14,8 @@ const TOOL_ALLOWLIST = [
   "ea_inbox_promote_to_day",
   "ea_inbox_promote_to_week",
   "ea_day_plan_read",
+  "ea_day_plan_find_latest_before",
+  "ea_day_plan_add_item_note",
   "ea_day_plan_list_unfinished",
   "ea_day_plan_mark_done",
   "ea_day_plan_remove_item",
