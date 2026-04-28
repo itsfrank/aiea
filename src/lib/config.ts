@@ -9,15 +9,11 @@ export interface EaConfig {
   };
 }
 
-const DEFAULT_CONFIG = `# AIEA configuration
+export const DEFAULT_CONFIG = `# AIEA configuration
 
 [pi]
 # Default model used when launching pi via \`ea\`.
-# Examples:
 # model = "openai/gpt-4o-mini"
-# model = "sonnet:high"
-# provider = "anthropic"
-# model = "claude-sonnet-4-5"
 `;
 
 export function getConfigPath(): string {
@@ -113,6 +109,25 @@ export async function ensureConfigFile(): Promise<string> {
     await writeFile(path, DEFAULT_CONFIG, "utf8");
     return DEFAULT_CONFIG;
   }
+}
+
+export async function initConfigFile(): Promise<string> {
+  const path = getConfigPath();
+  await mkdir(dirname(path), { recursive: true });
+
+  try {
+    const existing = await readFile(path, "utf8");
+    if (existing.trim().length > 0) {
+      return path;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  await writeFile(path, DEFAULT_CONFIG, "utf8");
+  return path;
 }
 
 export async function readEaConfig(): Promise<EaConfig> {

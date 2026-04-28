@@ -5,9 +5,11 @@ Minimal terminal executive assistant built on top of the pi coding agent harness
 ## What it does
 
 - `ea add "..."` appends a new item to `~/.ea/inbox.md`
+- `ea note "..."` appends a note to `~/.ea/inbox.md` for later review
 - `ea inbox` prints open inbox items
 - `ea today` prints today's plan when one exists
 - `ea done [query|id]` marks an inbox item done; with no argument it uses `fzf` to select an item
+- `ea config init` creates a default config file and prints its path
 - `ea` launches pi with a restrictive tool allowlist that exposes only EA inbox tools
 - the assistant can add items, label long captures, defer items, promote items into day/week plans, add notes to scheduled day-plan items during morning review, find the latest previous plan after skipped days, carry unfinished items forward, remove items from today, and mark planned or inbox items done
 
@@ -37,12 +39,17 @@ On launch, EA creates and reads user config from:
 ~/.config/aiea/config.toml
 ```
 
-Set the default pi model used by `ea`:
+Create the default config file:
+
+```bash
+ea config init
+```
+
+It prints the path where it wrote the file. To set the default pi model used by `ea`, uncomment/edit the sample model entry:
 
 ```toml
 [pi]
-model = "openai/gpt-4o-mini"
-# provider = "openai"
+# model = "openai/gpt-4o-mini"
 ```
 
 CLI flags still win, so `ea --model sonnet:high` overrides the config file.
@@ -53,6 +60,7 @@ Add a new inbox item:
 
 ```bash
 npm run ea -- add "task: draft weekly plan"
+npm run ea -- note "Cloud import retries looked flaky today"
 npm run ea -- add "reminder: follow up with Sam"
 npm run ea -- add "Maybe schedule dentist appointment"
 npm run ea -- inbox
