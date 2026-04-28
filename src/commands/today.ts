@@ -9,9 +9,9 @@ function hasPlanItems(content: string): boolean {
     .some((line) => line.startsWith("- "));
 }
 
-export async function runDayCommand(args: string[]): Promise<number> {
+export async function runTodayCommand(args: string[]): Promise<number> {
   if (args.length > 0) {
-    console.error("Usage: ea day");
+    console.error("Usage: ea today");
     return 1;
   }
 
@@ -25,12 +25,12 @@ export async function runDayCommand(args: string[]): Promise<number> {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
-    console.log(`No day plan found for ${date}. Run \`ea\` and use /plan-day to create today's plan.`);
+    console.log(`No plan found for today (${date}). Run \`ea\` and use /morning to create today's plan.`);
     return 0;
   }
 
   if (!hasPlanItems(content)) {
-    console.log(`Today's day plan (${date}) is empty. Run \`ea\` and use /plan-day to build one.`);
+    console.log(`Today's plan (${date}) is empty. Run \`ea\` and use /morning to build one.`);
     return 0;
   }
 

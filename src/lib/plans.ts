@@ -6,10 +6,11 @@ import {
   getWeeklyPlanPath,
 } from "./paths.js";
 import { getLocalDateKey, getLocalIsoWeekKey } from "./dates.js";
-import { getInboxItem, getInboxItemBaseLabel, type InboxItem } from "./inbox.js";
+import { getInboxItem, getInboxItemBaseLabel, markInboxItemDone, type InboxItem } from "./inbox.js";
 
 export interface ScheduledPlanItem {
   sourceId: string;
+  done: boolean;
   type: InboxItem["type"];
   text: string;
 }
@@ -30,14 +31,14 @@ export interface WeekPlan {
   path: string;
 }
 
-const scheduledPattern = /^- \[ \] \[from:([^\]]+)\] (task|reminder|note): (.+)$/;
+const scheduledPattern = /^- \[( |x)\] \[from:([^\]]+)\] (task|reminder|note): (.+)$/;
 
 function formatBulletSection(lines: string[]): string[] {
   return lines.length > 0 ? lines.map((line) => `- ${line}`) : [];
 }
 
 function formatScheduledSection(items: ScheduledPlanItem[]): string[] {
-  return items.map((item) => `- [ ] [from:${item.sourceId}] ${item.type}: ${item.text}`);
+  return items.map((item) => `- [${item.done ? "x" : " "}] [from:${item.sourceId}] ${item.type}: ${item.text}`);
 }
 
 function collectBulletItems(lines: string[]): string[] {
@@ -56,8 +57,8 @@ function collectScheduledItems(lines: string[]): ScheduledPlanItem[] {
     if (!match) {
       continue;
     }
-    const [, sourceId, type, text] = match;
-    items.push({ sourceId, type: type as InboxItem["type"], text });
+    const [, doneFlag, sourceId, type, text] = match;
+    items.push({ sourceId, done: doneFlag === "x", type: type as InboxItem["type"], text });
   }
   return items;
 }
@@ -131,6 +132,12 @@ export function getDateKey(date = new Date()): string {
   return getLocalDateKey(date);
 }
 
+export function getYesterdayDateKey(now = new Date()): string {
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  return getDateKey(yesterday);
+}
+
 export function getIsoWeekKey(date = new Date()): string {
   return getLocalIsoWeekKey(date);
 }
@@ -164,10 +171,57 @@ export async function addInboxItemToDayPlan(itemId: string, date = getDateKey())
   const inboxItem = await getInboxItem(itemId);
   const next: DayPlan = {
     ...plan,
-    scheduled: [...plan.scheduled, { sourceId: itemId, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem) }],
+    scheduled: [...plan.scheduled, { sourceId: itemId, done: inboxItem.done, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem) }],
   };
   await writeFile(next.path, formatDayPlan(next), "utf8");
   return next;
+}
+
+export async function markDayPlanItemDone(itemId: string, date = getDateKey()): Promise<{ plan: DayPlan; item: ScheduledPlanItem }> {
+  const plan = await readDayPlan(date);
+  const scheduledItem = plan.scheduled.find((item) => item.sourceId === itemId);
+  if (!scheduledItem) {
+    throw new Error(`Day plan item not found for ${date}: ${itemId}`);
+  }
+  await markInboxItemDone(itemId);
+  const next: DayPlan = {
+    ...plan,
+    scheduled: plan.scheduled.map((item) => (item.sourceId === itemId ? { ...item, done: true } : item)),
+  };
+  await writeFile(next.path, formatDayPlan(next), "utf8");
+  return { plan: next, item: { ...scheduledItem, done: true } };
+}
+
+export async function removeInboxItemFromDayPlan(itemId: string, date = getDateKey()): Promise<DayPlan> {
+  const plan = await readDayPlan(date);
+  const next: DayPlan = {
+    ...plan,
+    scheduled: plan.scheduled.filter((item) => item.sourceId !== itemId),
+  };
+  if (next.scheduled.length === plan.scheduled.length) {
+    throw new Error(`Day plan item not found for ${date}: ${itemId}`);
+  }
+  await writeFile(next.path, formatDayPlan(next), "utf8");
+  return next;
+}
+
+export async function listUnfinishedDayPlanItems(date = getDateKey()): Promise<ScheduledPlanItem[]> {
+  const plan = await readDayPlan(date);
+  return plan.scheduled.filter((item) => !item.done);
+}
+
+export async function carryDayPlanItemForward(
+  itemId: string,
+  fromDate = getYesterdayDateKey(),
+  toDate = getDateKey(),
+): Promise<{ from: DayPlan; to: DayPlan; item: ScheduledPlanItem }> {
+  const from = await readDayPlan(fromDate);
+  const item = from.scheduled.find((candidate) => candidate.sourceId === itemId);
+  if (!item) {
+    throw new Error(`Day plan item not found for ${fromDate}: ${itemId}`);
+  }
+  const to = await addInboxItemToDayPlan(itemId, toDate);
+  return { from, to, item };
 }
 
 export async function readWeekPlan(week = getIsoWeekKey()): Promise<WeekPlan> {
@@ -199,7 +253,7 @@ export async function addInboxItemToWeekPlan(itemId: string, week = getIsoWeekKe
   const inboxItem = await getInboxItem(itemId);
   const next: WeekPlan = {
     ...plan,
-    scheduled: [...plan.scheduled, { sourceId: itemId, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem) }],
+    scheduled: [...plan.scheduled, { sourceId: itemId, done: inboxItem.done, type: inboxItem.type, text: getInboxItemBaseLabel(inboxItem) }],
   };
   await writeFile(next.path, formatWeekPlan(next), "utf8");
   return next;

@@ -5,13 +5,18 @@ Minimal terminal executive assistant built on top of the pi coding agent harness
 ## What it does
 
 - `ea add "..."` appends a new item to `~/.ea/inbox.md`
-- `ea day` prints today's plan when one exists
+- `ea inbox` prints open inbox items
+- `ea today` prints today's plan when one exists
+- `ea done [query|id]` marks an inbox item done; with no argument it uses `fzf` to select an item
 - `ea` launches pi with a restrictive tool allowlist that exposes only EA inbox tools
-- the assistant can add items, label long captures, defer items, promote items into day/week plans, and mark inbox items done
+- the assistant can add items, label long captures, defer items, promote items into day/week plans, carry unfinished items forward, remove items from today, and mark planned or inbox items done
 
 ## Install
 
-Prerequisite: pi must be installed and configured. See pi's [Quick Start setup instructions](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
+Prerequisites:
+
+- pi must be installed and configured. See pi's [Quick Start setup instructions](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#quick-start).
+- `fzf` is required for interactive `ea done` selection when no ID/query is provided.
 
 ```bash
 npm install
@@ -24,6 +29,24 @@ Run the CLI directly from source:
 npm run ea -- --help
 ```
 
+## Configuration
+
+On launch, EA creates and reads user config from:
+
+```text
+~/.config/aiea/config.toml
+```
+
+Set the default pi model used by `ea`:
+
+```toml
+[pi]
+model = "openai/gpt-4o-mini"
+# provider = "openai"
+```
+
+CLI flags still win, so `ea --model sonnet:high` overrides the config file.
+
 ## Usage
 
 Add a new inbox item:
@@ -32,7 +55,9 @@ Add a new inbox item:
 npm run ea -- add "task: draft weekly plan"
 npm run ea -- add "reminder: follow up with Sam"
 npm run ea -- add "Maybe schedule dentist appointment"
-npm run ea -- day
+npm run ea -- inbox
+npm run ea -- today
+npm run ea -- done
 ```
 
 Launch the assistant:
@@ -44,8 +69,8 @@ npm run ea --
 Inside the assistant:
 
 - `/capture` adds a new inbox item
-- `/plan-day` reviews open inbox items and proposes today's plan
-- `/plan-week` reviews open inbox items and proposes the week's plan
+- `/morning` reviews yesterday, reconciles unfinished items, and proposes today's plan
+- `/today` reviews open inbox items and proposes today's plan
 
 ## Inbox format
 
@@ -67,7 +92,7 @@ The assistant prefers the short label in user-facing replies and keeps the full 
 
 This app does not expose pi's default coding tools when launched through `ea`.
 
-- allowed tools: `ea_inbox_add`, `ea_inbox_list`, `ea_inbox_set_label`, `ea_inbox_defer`, `ea_inbox_mark_done`, `ea_inbox_promote_to_day`, `ea_inbox_promote_to_week`, `ea_day_plan_read`, `ea_day_plan_write_priorities`, `ea_week_plan_read`, `ea_week_plan_write_priorities`
+- allowed tools: `ea_inbox_add`, `ea_inbox_list`, `ea_inbox_set_label`, `ea_inbox_defer`, `ea_inbox_mark_done`, `ea_inbox_promote_to_day`, `ea_inbox_promote_to_week`, `ea_day_plan_read`, `ea_day_plan_list_unfinished`, `ea_day_plan_mark_done`, `ea_day_plan_remove_item`, `ea_day_plan_carry_forward`, `ea_day_plan_write_priorities`, `ea_week_plan_read`, `ea_week_plan_write_priorities`
 - no generic file tools
 - no bash tool
 - no arbitrary path input to the model

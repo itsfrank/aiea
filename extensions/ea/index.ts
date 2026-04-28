@@ -11,10 +11,15 @@ import {
 import {
   addInboxItemToDayPlan,
   addInboxItemToWeekPlan,
+  carryDayPlanItemForward,
   getDateKey,
   getIsoWeekKey,
+  getYesterdayDateKey,
+  listUnfinishedDayPlanItems,
+  markDayPlanItemDone,
   readDayPlan,
   readWeekPlan,
+  removeInboxItemFromDayPlan,
   writeDayPlanPriorities,
   writeWeekPlanPriorities,
 } from "../../src/lib/plans.js";
@@ -31,7 +36,8 @@ Rules:
 - Do not assume access to any files or commands outside the EA tool surface.
 - The inbox is the source of truth for intake.
 - Review open inbox items before proposing a plan.
-- Use day and week plan tools to turn inbox items into concrete plans.
+- Use today and week plan tools to turn inbox items into concrete plans.
+- When the user says a planned item is finished, inspect today's plan and the inbox list details to find its source ID, then mark it done. Ask a clarifying question only if multiple items plausibly match.
 - Mark items done only when the user clearly confirms completion or the conversation has clearly resolved the item.
 - Use human-readable task names in replies. Use item IDs only for tool calls or when disambiguation is unavoidable.
 - When an inbox capture is too long or messy, create a short label during triage and use that label in user-facing replies.
@@ -55,7 +61,7 @@ function formatInboxListText(items: Awaited<ReturnType<typeof listInboxItems>>):
     return "No inbox items.";
   }
   return items
-    .map((item) => `- [${item.done ? "x" : " "}] ${getInboxItemDisplayLabel(item, items)}`)
+    .map((item) => `- [${item.done ? "x" : " "}] ${getInboxItemDisplayLabel(item, items)} [id:${item.id}]`)
     .join("\n");
 }
 
@@ -201,11 +207,83 @@ export default function eaExtension(pi: ExtensionAPI): void {
       const text = [
         `Day plan ${plan.date}`,
         `Priorities: ${plan.priorities.length ? plan.priorities.join(" | ") : "(none)"}`,
-        `Scheduled: ${plan.scheduled.length ? plan.scheduled.map((item) => item.text).join(" | ") : "(none)"}`,
+        `Scheduled: ${plan.scheduled.length ? plan.scheduled.map((item) => `${item.done ? "done" : "open"}: ${item.text} [id:${item.sourceId}]`).join(" | ") : "(none)"}`,
       ].join("\n");
       return {
         content: [{ type: "text", text }],
         details: plan,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ea_day_plan_list_unfinished",
+    label: "EA Day Plan Unfinished",
+    description: "List unfinished scheduled items from a day plan.",
+    parameters: Type.Object({
+      date: Type.Optional(Type.String({ description: "Date in YYYY-MM-DD format" })),
+    }),
+    async execute(_toolCallId, params) {
+      const date = params.date ?? getDateKey();
+      const items = await listUnfinishedDayPlanItems(date);
+      const text = items.length
+        ? items.map((item) => `- ${item.text} [id:${item.sourceId}]`).join("\n")
+        : "No unfinished scheduled items.";
+      return {
+        content: [{ type: "text", text: `Unfinished items for ${date}:\n${text}` }],
+        details: { date, items },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ea_day_plan_mark_done",
+    label: "EA Day Plan Done",
+    description: "Mark a scheduled day-plan item done by source inbox ID. Also marks the inbox item done.",
+    parameters: Type.Object({
+      id: Type.String({ description: "Source inbox item ID" }),
+      date: Type.Optional(Type.String({ description: "Date in YYYY-MM-DD format" })),
+    }),
+    async execute(_toolCallId, params) {
+      const result = await markDayPlanItemDone(params.id, params.date ?? getDateKey());
+      return {
+        content: [{ type: "text", text: `Marked done: ${result.item.text}` }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ea_day_plan_remove_item",
+    label: "EA Day Plan Remove Item",
+    description: "Remove a scheduled item from a day plan without marking the inbox item done.",
+    parameters: Type.Object({
+      id: Type.String({ description: "Source inbox item ID" }),
+      date: Type.Optional(Type.String({ description: "Date in YYYY-MM-DD format" })),
+    }),
+    async execute(_toolCallId, params) {
+      const plan = await removeInboxItemFromDayPlan(params.id, params.date ?? getDateKey());
+      return {
+        content: [{ type: "text", text: `Removed item from day plan ${plan.date}` }],
+        details: plan,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "ea_day_plan_carry_forward",
+    label: "EA Day Plan Carry Forward",
+    description: "Carry an unfinished scheduled item from one day plan into another. Leaves the original day as history.",
+    parameters: Type.Object({
+      id: Type.String({ description: "Source inbox item ID" }),
+      fromDate: Type.Optional(Type.String({ description: "Source date in YYYY-MM-DD format; defaults to yesterday" })),
+      toDate: Type.Optional(Type.String({ description: "Target date in YYYY-MM-DD format; defaults to today" })),
+    }),
+    async execute(_toolCallId, params) {
+      const result = await carryDayPlanItemForward(params.id, params.fromDate ?? getYesterdayDateKey(), params.toDate ?? getDateKey());
+      return {
+        content: [{ type: "text", text: `Carried forward: ${result.item.text} into ${result.to.date}` }],
+        details: result,
       };
     },
   });
@@ -291,20 +369,20 @@ export default function eaExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("plan-day", {
-    description: "Review inbox and propose today's priorities",
+  pi.registerCommand("morning", {
+    description: "Review yesterday and plan today",
     handler: async () => {
       pi.sendUserMessage(
-        "Review the open inbox items and today's day plan. Identify the most important items for today, write a concise priorities section for the day plan when helpful, and promote specific inbox items into today's scheduled section when they belong there. Use human-readable task names in your reply. Use item IDs only for tool calls or if disambiguation is unavoidable.",
+        "Run morning planning. Read yesterday's day plan, today's day plan, and open inbox items. First identify unfinished scheduled items from yesterday. Ask which are done, which should carry forward into today, which should simply return to the inbox by not carrying them forward, and which should be deferred. Then propose today's top priorities and promote selected inbox items into today's plan. If I say an item is finished, use the plan/inbox details to find the source ID and mark it done; ask only if ambiguous.",
       );
     },
   });
 
-  pi.registerCommand("plan-week", {
-    description: "Review inbox and propose this week's priorities",
+  pi.registerCommand("today", {
+    description: "Review inbox and propose today's priorities",
     handler: async () => {
       pi.sendUserMessage(
-        "Review the open inbox items and the current week plan. Group work into this week's priorities, write a concise priorities section for the week plan when helpful, and promote specific inbox items into this week's scheduled section when they belong there. Use human-readable task names in your reply. Use item IDs only for tool calls or if disambiguation is unavoidable.",
+        "Review the open inbox items and today's plan. Identify the most important items for today, write a concise priorities section when helpful, and promote specific inbox items into today's scheduled section when they belong there. Use human-readable task names in your reply. Use item IDs only for tool calls or if disambiguation is unavoidable.",
       );
     },
   });
