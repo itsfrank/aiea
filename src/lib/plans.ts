@@ -5,6 +5,7 @@ import {
   getDailyPlanPath,
   getWeeklyPlanPath,
 } from "./paths.js";
+import { getLocalDateKey, getLocalIsoWeekKey } from "./dates.js";
 import { getInboxItem, getInboxItemBaseLabel, type InboxItem } from "./inbox.js";
 
 export interface ScheduledPlanItem {
@@ -127,16 +128,11 @@ async function ensurePlanFile(path: string, initialContent: string): Promise<str
 }
 
 export function getDateKey(date = new Date()): string {
-  return date.toISOString().slice(0, 10);
+  return getLocalDateKey(date);
 }
 
 export function getIsoWeekKey(date = new Date()): string {
-  const utcDate = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const day = utcDate.getUTCDay() || 7;
-  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
-  const week = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-  return `${utcDate.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+  return getLocalIsoWeekKey(date);
 }
 
 export async function readDayPlan(date = getDateKey()): Promise<DayPlan> {

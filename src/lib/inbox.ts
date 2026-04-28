@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import { getLocalDateKey, getLocalTimeKey } from "./dates.js";
 import { ensureEaHome, getInboxPath } from "./paths.js";
 
 export type InboxItemType = "task" | "reminder" | "note";
@@ -21,7 +22,7 @@ const labelPattern = / \[label:([^\]]+)\]/;
 const reviewOnPattern = / \[review_on:(\d{4}-\d{2}-\d{2})\]$/;
 
 function formatDateKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return getLocalDateKey(date);
 }
 
 function createItemId(date: Date): string {
@@ -53,11 +54,11 @@ function ensureHeader(content: string): string {
 
 function formatTimestampContext(timestamp: string, now = new Date()): string {
   const date = new Date(timestamp);
-  const sameDay = date.toISOString().slice(0, 10) === now.toISOString().slice(0, 10);
+  const sameDay = getLocalDateKey(date) === getLocalDateKey(now);
   const yesterday = new Date(now);
-  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-  const isYesterday = date.toISOString().slice(0, 10) === yesterday.toISOString().slice(0, 10);
-  const time = date.toISOString().slice(11, 19);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = getLocalDateKey(date) === getLocalDateKey(yesterday);
+  const time = getLocalTimeKey(date);
 
   if (sameDay) {
     return `captured today at ${time}`;
@@ -65,7 +66,7 @@ function formatTimestampContext(timestamp: string, now = new Date()): string {
   if (isYesterday) {
     return `captured yesterday at ${time}`;
   }
-  return `captured ${date.toISOString().slice(0, 10)} at ${time}`;
+  return `captured ${getLocalDateKey(date)} at ${time}`;
 }
 
 function formatInboxLine(item: Pick<InboxItem, "id" | "done" | "timestamp" | "type" | "text" | "label" | "reviewOn">): string {

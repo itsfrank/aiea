@@ -20,7 +20,7 @@ import {
 } from "../../src/lib/plans.js";
 
 function buildSystemPrompt(options: BuildSystemPromptOptions): string {
-  const date = new Date().toISOString().slice(0, 10);
+  const date = getDateKey();
   const cwd = options.cwd.replace(/\\/g, "/");
   return `You are an executive assistant running inside a restricted pi harness.
 
